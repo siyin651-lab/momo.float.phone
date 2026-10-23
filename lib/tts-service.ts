@@ -25,6 +25,7 @@ export function resolveVoiceConfig(characterId: string, appId?: ContentAppId): V
  * Supported providers:
  * - Minimax: REST API → hex-encoded mp3
  * - OpenAI: REST API → binary audio blob
+ * - FishAudio: 服务端代理路由 /api/voice/fish-audio → binary audio blob（key 可由服务端兜底）
  */
 export async function synthesizeSpeech(
     text: string,
@@ -41,6 +42,10 @@ export async function synthesizeSpeech(
 
     if (provider === "OpenAI") {
         return synthesizeOpenAI(text, voiceConfig);
+    }
+
+    if (provider === "FishAudio") {
+        return synthesizeFishAudio(text, voiceConfig);
     }
 
     return null;
@@ -171,6 +176,35 @@ async function synthesizeOpenAI(text: string, config: VoiceApiConfig): Promise<B
     if (!response.ok) {
         const errText = await response.text().catch(() => "");
         throw new Error(`OpenAI TTS 请求失败 (${response.status}): ${errText}`);
+    }
+
+    const blob = await response.blob();
+    return new Blob([await blob.arrayBuffer()], { type: "audio/mpeg" });
+}
+
+// ── Fish Audio TTS（走服务端代理路由）────────────────
+
+// 音色即 Fish Audio 模型 Reference ID，存放在 defaultVoice 字段。
+// apiKey 可留空：自部署且服务端配置了 FISH_AUDIO_API_KEY 时由代理兜底，
+// 避免 Fish Audio 密钥暴露到浏览器。
+async function synthesizeFishAudio(text: string, config: VoiceApiConfig): Promise<Blob | null> {
+    const response = await fetchWithTimeout("/api/voice/fish-audio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            text,
+            reference_id: config.defaultVoice || undefined,
+            apiKey: config.apiKey || undefined,
+            format: "mp3",
+        }),
+    });
+
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}) as Record<string, unknown>);
+        const message = typeof err.message === "string" && err.message
+            ? err.message
+            : typeof err.error === "string" && err.error ? err.error : "";
+        throw new Error(message || `Fish Audio TTS 请求失败 (${response.status})`);
     }
 
     const blob = await response.blob();
