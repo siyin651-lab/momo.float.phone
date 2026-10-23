@@ -10,8 +10,10 @@ import { loadBindingConfig, loadVoiceConfigs, resolveBinding } from "./settings-
 import type { VoiceApiConfig } from "./settings-types";
 
 export type CloudSttConfig = {
+    provider: "OpenAI" | "FishAudio";
     baseUrl: string;
     apiKey: string;
+    /** OpenAI: whisper 模型名;FishAudio: 语言提示(如 zh/en,可选,留空自动检测)。 */
     model: string;
 };
 
@@ -20,11 +22,27 @@ const TRANSCRIBE_TIMEOUT_MS = 60_000;
 // 录音兜底上限：忘记松手/指针事件丢失时自动停，避免无限占用麦克风
 const MAX_RECORDING_MS = 60_000;
 
+function normalizeFishSttBaseUrl(value: unknown): string {
+    const raw = typeof value === "string" && value.trim() ? value.trim() : "https://api.fish.audio";
+    const withProto = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    return withProto.replace(/\/+$/, "").replace(/\/v1$/i, "");
+}
+
 function toCloudSttConfig(config: VoiceApiConfig | undefined | null): CloudSttConfig | null {
-    if (!config || config.provider !== "OpenAI") return null;
+    if (!config) return null;
+    if (config.provider !== "OpenAI" && config.provider !== "FishAudio") return null;
     if (!config.apiKey?.trim()) return null;
     if (config.enableSTT === false) return null;
+    if (config.provider === "FishAudio") {
+        return {
+            provider: "FishAudio",
+            baseUrl: normalizeFishSttBaseUrl(config.baseUrl).replace(/\/+$/, ""),
+            apiKey: config.apiKey.trim(),
+            model: config.sttModel?.trim() || "",
+        };
+    }
     return {
+        provider: "OpenAI",
         baseUrl: (config.baseUrl || "https://api.openai.com/v1").trim().replace(/\/+$/, ""),
         apiKey: config.apiKey.trim(),
         model: config.sttModel?.trim() || DEFAULT_STT_MODEL,
@@ -132,13 +150,46 @@ export async function startCallRecording(): Promise<ActiveCallRecording> {
     };
 }
 
-/** 调 OpenAI 兼容 /audio/transcriptions 把录音转文字。 */
+/** 调语音识别接口把录音转文字(OpenAI 兼容 /audio/transcriptions 或 Fish Audio /v1/asr)。 */
 export async function transcribeAudioBlob(blob: Blob, config: CloudSttConfig): Promise<string> {
     const type = (blob.type || "").toLowerCase();
     const ext = type.includes("mp4") ? "mp4"
         : type.includes("ogg") ? "ogg"
         : type.includes("wav") ? "wav"
         : "webm";
+
+    // Fish Audio ASR:POST {base}/v1/asr,multipart 字段 audio=@file,可选 language。返回 {text,...}
+    if (config.provider === "FishAudio") {
+        const form = new FormData();
+        form.set("audio", blob, `speech.${ext}`);
+        if (config.model) form.set("language", config.model);
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), TRANSCRIBE_TIMEOUT_MS);
+        try {
+            const res = await fetch(`${config.baseUrl}/v1/asr`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${config.apiKey}` },
+                body: form,
+                signal: controller.signal,
+            });
+            if (!res.ok) {
+                const text = await res.text().catch(() => "");
+                throw new Error(`Fish Audio 语音识别 API 错误 ${res.status}: ${text.slice(0, 200)}`);
+            }
+            const data = await res.json() as { text?: unknown };
+            return typeof data.text === "string" ? data.text.trim() : "";
+        } catch (e) {
+            if (e instanceof DOMException && e.name === "AbortError") {
+                throw new Error(`语音识别超时（超过 ${Math.round(TRANSCRIBE_TIMEOUT_MS / 1000)} 秒无响应）`);
+            }
+            throw e;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    // OpenAI 兼容 /audio/transcriptions
     const form = new FormData();
     form.set("model", config.model);
     form.set("file", blob, `speech.${ext}`);
