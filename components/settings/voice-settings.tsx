@@ -404,22 +404,77 @@ export function VoiceSettings() {
         const config = configs.find(c => c.id === cloneTargetId);
         if (!config) return;
         setCloneError("");
-        const voiceId = cloneVoiceId.trim();
+
         if (!config.apiKey.trim()) {
-            setCloneError("请先填写 Minimax API Key");
-            return;
-        }
-        if (!voiceId || !/^[A-Za-z0-9_-]{4,64}$/.test(voiceId)) {
-            setCloneError("Voice ID 只能包含英文、数字、下划线和连字符，长度 4-64");
+            setCloneError(config.provider === "Minimax" ? "请先填写 Minimax API Key" : "请先填写 Fish Audio API Key");
             return;
         }
         if (!cloneFile) {
             setCloneError("请上传一段音频文件");
             return;
         }
-
         if (cloneFile.size > 20 * 1024 * 1024) {
             setCloneError("音频文件超过 20MB,请压缩后再试(30 秒左右的干净人声即可)");
+            return;
+        }
+
+        // Fish Audio 克隆走服务端中转,密钥不出浏览器;Minimax 沿用浏览器直连。
+        if (config.provider === "FishAudio") {
+            setIsCloning(true);
+            try {
+                const form = new FormData();
+                form.set("file", cloneFile, cloneFile.name || "voice-sample.mp3");
+                form.set("title", cloneVoiceId.trim());
+                form.set("apiKey", config.apiKey.trim());
+                form.set("baseUrl", config.baseUrl || DEFAULT_FISH_BASE_URL);
+                const res = await fetch("/api/voice/fish-audio/model", { method: "POST", body: form });
+                const data = await res.json().catch(() => ({} as Record<string, unknown>));
+                if (!res.ok) {
+                    throw new Error(
+                        (data?.message as string)
+                        || (data?.error as string)
+                        || `克隆失败 (HTTP ${res.status})`,
+                    );
+                }
+                const referenceId = data?.referenceId as string | undefined;
+                if (!referenceId) {
+                    throw new Error("克隆成功但未返回 Reference ID，请稍后在 Fish Audio 后台确认音色状态");
+                }
+                const clonedVoice: VoiceOption = {
+                    id: referenceId,
+                    name: `克隆音色 (${(data?.title as string) || referenceId})`,
+                    createdAt: Date.now(),
+                };
+                updateConfig(config.id, {
+                    defaultVoice: referenceId,
+                    customVoices: uniqueOptions([clonedVoice, ...(config.customVoices || [])]),
+                });
+                setFetchedVoices(prev => {
+                    const current = prev[config.id] || [];
+                    return { ...prev, [config.id]: uniqueOptions([clonedVoice, ...current]) };
+                });
+                setCloneTargetId(null);
+                setCloneVoiceId("");
+                setCloneFile(null);
+                setCloneError("");
+                setManualVoiceIds(prev => ({ ...prev, [config.id]: false }));
+            } catch (error: unknown) {
+                const msg = error instanceof Error ? error.message : String(error);
+                setCloneError(msg);
+            } finally {
+                setIsCloning(false);
+            }
+            return;
+        }
+
+        if (config.provider !== "Minimax") {
+            setCloneError("该服务商暂不支持音色克隆");
+            return;
+        }
+
+        const voiceId = cloneVoiceId.trim();
+        if (!voiceId || !/^[A-Za-z0-9_-]{4,64}$/.test(voiceId)) {
+            setCloneError("Voice ID 只能包含英文、数字、下划线和连字符，长度 4-64");
             return;
         }
 
@@ -767,6 +822,16 @@ export function VoiceSettings() {
                                                     )}
                                                     <span className="menu-desc ml-1">模型经 model 请求头发送；S2.1 Pro Free 适合测试，正式使用选 S2.1 Pro。</span>
                                                 </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="menu-desc ml-1">识别语言 (STT Language)</label>
+                                                    <Input
+                                                        type="text"
+                                                        value={config.sttModel || ""}
+                                                        onChange={(e) => updateConfig(config.id, { sttModel: e.target.value })}
+                                                        placeholder="zh（留空自动检测）"
+                                                    />
+                                                    <span className="menu-desc ml-1">通话「按住说话」用它把录音转成文字（非 iOS 设备生效）。填语言代码(如 zh/en/ja)可提升短音频准确率，留空自动检测。</span>
+                                                </div>
                                             </>
                                         )}
                                         {config.provider === "OpenAI" && (
@@ -1038,19 +1103,19 @@ export function VoiceSettings() {
                         <div className="modal-expand" data-ui="modal-dialog" style={{ width: "min(420px, calc(100% - 32px))", maxHeight: "82%" }}>
                             <div className="modal-header" data-ui="modal-header">
                                 <button onClick={closeCloneModal} disabled={isCloning} className="modal-header-btn modal-header-btn-muted"><X size={18} /></button>
-                                <span className="modal-header-title">克隆 Minimax 音色</span>
+                                <span className="modal-header-title">{config.provider === "Minimax" ? "克隆 Minimax 音色" : "克隆 Fish Audio 音色"}</span>
                                 <button onClick={submitClone} disabled={isCloning} className="modal-header-btn modal-header-btn-action"><Check size={18} /></button>
                             </div>
 
                             <div className="modal-body hide-scrollbar" data-ui="modal-body">
                                 <div className="flex flex-col gap-4">
                                     <div className="flex flex-col gap-1">
-                                        <label className="menu-desc ml-1">新 Voice ID</label>
+                                        <label className="menu-desc ml-1">{config.provider === "Minimax" ? "新 Voice ID" : "音色名称 (可选)"}</label>
                                         <Input
                                             type="text"
                                             value={cloneVoiceId}
                                             onChange={(e) => setCloneVoiceId(e.target.value)}
-                                            placeholder="例如 voice_xxx"
+                                            placeholder={config.provider === "Minimax" ? "例如 voice_xxx" : "例如 我的声音"}
                                             disabled={isCloning}
                                         />
                                     </div>
@@ -1064,9 +1129,15 @@ export function VoiceSettings() {
                                             className="ui-input"
                                         />
                                         <span className="menu-desc ml-1">建议上传 10-30 秒、声音清晰、背景噪音少的音频。</span>
-                                        <span className="ml-1 text-xs font-medium text-red-500">
-                                            克隆音色初次使用将会扣除 9.9 元 Minimax token 费用（包含试听）。
-                                        </span>
+                                        {config.provider === "Minimax" ? (
+                                            <span className="ml-1 text-xs font-medium text-red-500">
+                                                克隆音色初次使用将会扣除 9.9 元 Minimax token 费用（包含试听）。
+                                            </span>
+                                        ) : (
+                                            <span className="ml-1 text-xs font-medium text-amber-600">
+                                                克隆会消耗 Fish Audio 额度，克隆成功后将自动写入默认音色 (Reference ID)，可在 TTS 音色处直接使用。
+                                            </span>
+                                        )}
                                     </div>
 
                                     {cloneError && (
@@ -1083,7 +1154,7 @@ export function VoiceSettings() {
                                         className="ui-btn ui-btn-primary w-full"
                                     >
                                         {isCloning ? <RefreshCw size={16} className="animate-spin" /> : <Upload size={16} />}
-                                        {isCloning ? "正在克隆..." : "开始克隆并写入 Voice ID"}
+                                        {isCloning ? "正在克隆..." : config.provider === "Minimax" ? "开始克隆并写入 Voice ID" : "开始克隆并写入 Reference ID"}
                                     </button>
                                 </div>
                             </div>
