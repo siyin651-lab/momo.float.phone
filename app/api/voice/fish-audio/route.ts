@@ -1,8 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
+import { proxyFetch } from "@/lib/proxy-fetch";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+const FISH_AUDIO_TTS_URL = "https://api.fish.audio/v1/tts";
+const FISH_AUDIO_MODEL_URL = "https://api.fish.audio/v1/model";
+
+// 密钥解析优先级:请求体 apiKey → Authorization 头 → 服务端 FISH_AUDIO_API_KEY 兜底。
+// 服务端兜底让自部署时前端无需持有 key,key 不暴露到浏览器(与仓库 TRIPO/IMGBB 约定一致)。
+function resolveApiKey(req: NextRequest, bodyKey?: string): string | null {
+  if (bodyKey && String(bodyKey).trim()) return String(bodyKey).trim();
+  const auth = req.headers.get("authorization");
+  if (auth) {
+    const cleaned = auth.replace(/^Bearer\s+/i, "").trim();
+    if (cleaned) return cleaned;
+  }
+  const envKey = process.env.FISH_AUDIO_API_KEY;
+  return envKey && envKey.trim() ? envKey.trim() : null;
+}
+
+function audioContentType(format: string): string {
+  switch (format) {
+    case "wav":
+      return "audio/wav";
+    case "opus":
+      return "audio/opus";
+    case "pcm":
+      return "audio/pcm";
+    case "flac":
+      return "audio/flac";
+    default:
+      return "audio/mpeg";
+  }
+}
+
+// POST /api/voice/fish-audio — 文本合成语音(代理 Fish Audio TTS v1)
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const body = (await req.json().catch(() => ({}))) as Record<string, any>;
     const {
       text,
       reference_id,
@@ -11,29 +47,32 @@ export async function POST(req: NextRequest) {
       mp3_bitrate = 128,
       normalize = true,
       latency = "normal",
+      stream = false,
     } = body;
 
-    const token = apiKey || req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-
+    const token = resolveApiKey(req, apiKey);
     if (!token) {
       return NextResponse.json(
-        { error: "缺少 API Key：请在请求体中传入 apiKey 或在 Authorization header 中配置 Bearer Token" },
-        { status: 401 }
+        {
+          error: "missing_api_key",
+          message:
+            "缺少 Fish Audio API Key：可在请求体传 apiKey、在 Authorization 头配置 Bearer，或在服务端配置 FISH_AUDIO_API_KEY 环境变量",
+        },
+        { status: 401 },
       );
     }
 
-    if (!text) {
+    if (typeof text !== "string" || !text.trim()) {
       return NextResponse.json(
-        { error: "缺少合成文本：text 为必填项" },
-        { status: 400 }
+        { error: "missing_text", message: "text 为必填项且不能为空" },
+        { status: 400 },
       );
     }
 
-    // 调用 Fish Audio TTS API (v1)
-    const fishRes = await fetch("https://api.fish.audio/v1/tts", {
+    const fishRes = await proxyFetch(FISH_AUDIO_TTS_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${token}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -43,31 +82,86 @@ export async function POST(req: NextRequest) {
         mp3_bitrate,
         normalize,
         latency,
+        stream: Boolean(stream),
       }),
     });
 
     if (!fishRes.ok) {
-      const errText = await fishRes.text();
+      const errText = await fishRes.text().catch(() => "");
+      const status = fishRes.status === 401 ? 401 : 502;
       return NextResponse.json(
-        { error: `Fish Audio 接口错误 (${fishRes.status}): ${errText}` },
-        { status: fishRes.status }
+        {
+          error: "fish_audio_error",
+          message: `Fish Audio 接口错误 (${fishRes.status}): ${errText.slice(0, 500)}`,
+        },
+        { status },
       );
     }
 
     const audioBuffer = await fishRes.arrayBuffer();
-    const contentType = format === "wav" ? "audio/wav" : format === "opus" ? "audio/opus" : "audio/mpeg";
-
     return new NextResponse(audioBuffer, {
       status: 200,
       headers: {
-        "Content-Type": contentType,
-        "Content-Length": audioBuffer.byteLength.toString(),
+        "Content-Type": audioContentType(format),
+        "Content-Length": String(audioBuffer.byteLength),
+        "Cache-Control": "no-store",
       },
     });
   } catch (error: any) {
+    const message = error instanceof Error ? error.message : String(error);
+    // 本地 dev 出网失败(需代理)、上游超时等都带上原因返回,避免裸 500
     return NextResponse.json(
-      { error: error?.message || "合成请求处理失败" },
-      { status: 500 }
+      { error: "synthesis_failed", message: message.slice(0, 500) },
+      { status: 502 },
+    );
+  }
+}
+
+// GET /api/voice/fish-audio?reference_id=xxx — 校验/获取声音(模型)元数据
+export async function GET(req: NextRequest) {
+  const reference_id = req.nextUrl.searchParams.get("reference_id");
+  const token = resolveApiKey(req);
+  if (!token) {
+    return NextResponse.json(
+      { error: "missing_api_key", message: "缺少 Fish Audio API Key" },
+      { status: 401 },
+    );
+  }
+  if (!reference_id || !reference_id.trim()) {
+    return NextResponse.json(
+      { error: "missing_reference_id", message: "请提供 reference_id 查询模型信息" },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const res = await proxyFetch(`${FISH_AUDIO_MODEL_URL}/${reference_id.trim()}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const text = await res.text().catch(() => "");
+    if (!res.ok) {
+      const status = res.status === 401 ? 401 : 502;
+      return NextResponse.json(
+        {
+          error: "model_lookup_failed",
+          message: `Fish Audio 模型查询失败 (${res.status}): ${text.slice(0, 500)}`,
+        },
+        { status },
+      );
+    }
+    let data: unknown = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text };
+    }
+    return NextResponse.json(data);
+  } catch (error: any) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json(
+      { error: "model_lookup_failed", message: message.slice(0, 500) },
+      { status: 502 },
     );
   }
 }
