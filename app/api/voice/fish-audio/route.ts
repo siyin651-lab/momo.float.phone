@@ -4,8 +4,16 @@ import { proxyFetch } from "@/lib/proxy-fetch";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const FISH_AUDIO_TTS_URL = "https://api.fish.audio/v1/tts";
-const FISH_AUDIO_MODEL_URL = "https://api.fish.audio/v1/model";
+const FISH_AUDIO_TTS_PATH = "/v1/tts";
+const FISH_AUDIO_MODEL_PATH = "/v1/model";
+const DEFAULT_FISH_BASE_URL = "https://api.fish.audio";
+
+// 允许自定义接口地址（反代）；宽容处理末尾 / 与误带的 /v1
+function normalizeFishBaseUrl(value: unknown): string {
+  const raw = typeof value === "string" && value.trim() ? value.trim() : DEFAULT_FISH_BASE_URL;
+  const withProto = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  return withProto.replace(/\/+$/, "").replace(/\/v1$/i, "");
+}
 
 // 密钥解析优先级:请求体 apiKey → Authorization 头 → 服务端 FISH_AUDIO_API_KEY 兜底。
 // 服务端兜底让自部署时前端无需持有 key,key 不暴露到浏览器(与仓库 TRIPO/IMGBB 约定一致)。
@@ -48,7 +56,11 @@ export async function POST(req: NextRequest) {
       normalize = true,
       latency = "normal",
       stream = false,
+      model,
+      baseUrl,
     } = body;
+
+    const fishBase = normalizeFishBaseUrl(baseUrl);
 
     const token = resolveApiKey(req, apiKey);
     if (!token) {
@@ -69,11 +81,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const fishRes = await proxyFetch(FISH_AUDIO_TTS_URL, {
+    const fishRes = await proxyFetch(`${fishBase}${FISH_AUDIO_TTS_PATH}`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
+        // Fish Audio 用 model 请求头选择模型（s2.1-pro / s2.1-pro-free / s2-pro / s1）
+        ...(typeof model === "string" && model.trim() ? { model: model.trim() } : {}),
       },
       body: JSON.stringify({
         text,
@@ -120,6 +134,7 @@ export async function POST(req: NextRequest) {
 // GET /api/voice/fish-audio?reference_id=xxx — 校验/获取声音(模型)元数据
 export async function GET(req: NextRequest) {
   const reference_id = req.nextUrl.searchParams.get("reference_id");
+  const baseUrl = req.nextUrl.searchParams.get("baseUrl");
   const token = resolveApiKey(req);
   if (!token) {
     return NextResponse.json(
@@ -135,7 +150,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const res = await proxyFetch(`${FISH_AUDIO_MODEL_URL}/${reference_id.trim()}`, {
+    const res = await proxyFetch(`${normalizeFishBaseUrl(baseUrl)}${FISH_AUDIO_MODEL_PATH}/${reference_id.trim()}`, {
       method: "GET",
       headers: { Authorization: `Bearer ${token}` },
     });
