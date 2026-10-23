@@ -62,6 +62,85 @@ type StorySettingsPageProps = {
   onOpenCss: () => void;
   onRebuildCache: () => void;
 };
+  const [isSummarizing, setIsSummarizing] = useState(false);
+
+  const handleSummarizeToMemory = async () => {
+    if (!ownerSessions || ownerSessions.length === 0) {
+      alert("当前暂无剧情场次");
+      return;
+    }
+
+    const currentSession = ownerSessions.find((s) => s.id === activeSessionId) || ownerSessions[0];
+    const messages = currentSession?.messages || [];
+    if (messages.length === 0) {
+      alert("当前剧情暂无对话记录");
+      return;
+    }
+
+    const targetChar = characters.find((c) => c.id === activeCharacterId);
+    if (!targetChar) {
+      alert("未找到当前剧情绑定的角色");
+      return;
+    }
+
+    const apiSettingsStr = localStorage.getItem("api_settings");
+    if (!apiSettingsStr) {
+      alert("请先前往「设置 → API 设置」配置好 API");
+      return;
+    }
+
+    setIsSummarizing(true);
+    try {
+      const { baseUrl, apiKey, model } = JSON.parse(apiSettingsStr);
+
+      const dialogueText = messages
+        .slice(-30)
+        .map((m: any) => `${m.role === "user" ? userName || "用户" : targetChar.name}: ${m.renderedContent || m.rawContent || m.content || ""}`)
+        .join("\n");
+
+      const prompt = `请作为记录员，提炼以下剧情历程中角色「${targetChar.name}」所经历的核心事件、重大转折与情感/心理变化。\n要求：语言客观精练，适合作为长期记忆，200字以内，直接输出总结内容。\n\n【剧情对话】\n${dialogueText}`;
+
+      const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.7,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`API 报错: ${res.status}`);
+
+      const data = await res.json();
+      const summary = data.choices?.[0]?.message?.content?.trim();
+      if (!summary) throw new Error("未能生成有效内容");
+
+      // 追加写入角色的手记列表
+      const rawChars = localStorage.getItem("characters");
+      if (rawChars) {
+        const charList = JSON.parse(rawChars);
+        const idx = charList.findIndex((c: any) => c.id === targetChar.id);
+        if (idx !== -1) {
+          charList[idx].notes = [
+            ...(charList[idx].notes || []),
+            `【剧情记忆·${currentSession.title || "剧本历程"}】${summary}`
+          ];
+          localStorage.setItem("characters", JSON.stringify(charList));
+        }
+      }
+
+      alert(`已成功将本场剧情总结写入「${targetChar.name}」的手记中！`);
+    } catch (err: any) {
+      console.error(err);
+      alert(`总结失败: ${err.message || "请检查网络或配置"}`);
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
 
 function normalizeSettings(value: StoryCharacterSettings, repo: StorySchemeRepository): StoryCharacterSettings {
   return {
@@ -799,6 +878,13 @@ export function StorySettingsPage(props: StorySettingsPageProps) {
           <button className="story-settings-row-button" type="button" onClick={() => setWallpaperOpen(true)}><span><strong>背景壁纸</strong><small>{props.uiPrefs.wallpaper ? "已设置 · 仅当前角色" : "未设置"}</small></span><ChevronLeftIcon width={17} style={{ transform: "rotate(180deg)" }} /></button>
           <button className="story-settings-row-button" type="button" onClick={props.onOpenCss}><span><strong>页面 CSS 样式</strong><small>进入完整样式编辑页面</small></span><ChevronLeftIcon width={17} style={{ transform: "rotate(180deg)" }} /></button>
           <button className="story-settings-row-button" type="button" onClick={props.onRebuildCache}><span><strong>重建剧情渲染缓存</strong><small>方案或标签变化后使用</small></span><ChevronLeftIcon width={17} style={{ transform: "rotate(180deg)" }} /></button>
+          <button className="story-settings-row-button" type="button" onClick={handleSummarizeToMemory} disabled={isSummarizing}>
+  <span>
+    <strong style={{ color: '#a855f7' }}>{isSummarizing ? "正在提炼记忆..." : "✨ 总结剧情至角色记忆"}</strong>
+    <small>提炼本场核心事件并写入角色手记</small>
+  </span>
+  <ChevronLeftIcon width={17} style={{ transform: "rotate(180deg)" }} />
+</button>
         </SettingCard>
       </main>
     </div>
