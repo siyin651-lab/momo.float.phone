@@ -32,6 +32,15 @@ const VOICE_PROVIDER_OPTIONS = [
     { value: "MinimaxGlobal", label: "Minimax 语音海外版" },
     { value: "FishAudio", label: "Fish Audio" },
 ];
+// Fish Audio：模型经 model 请求头选择；s1 将于 2026-12-31 退役（之后由 s2.1-pro 接管）
+const DEFAULT_FISH_BASE_URL = "https://api.fish.audio";
+const DEFAULT_FISH_MODEL = "s2.1-pro";
+const FISH_AUDIO_MODELS = [
+    { id: "s2.1-pro-free", name: "S2.1 Pro Free（免费额度）" },
+    { id: "s2.1-pro", name: "S2.1 Pro（推荐）" },
+    { id: "s2-pro", name: "S2 Pro" },
+    { id: "s1", name: "S1（即将退役）" },
+];
 
 const DEFAULT_VOICE_CONFIGS: VoiceApiConfig[] = [
     {
@@ -200,6 +209,12 @@ function normalizeVoiceConfigs(configs: VoiceApiConfig[]): VoiceApiConfig[] {
     return configs
         .filter(config => SUPPORTED_VOICE_PROVIDERS.has(config.provider))
         .map(config => {
+            if (config.provider === "FishAudio") {
+                // 老配置可能没存 baseUrl/model：补默认官方地址与推荐模型
+                const baseUrl = (config.baseUrl || "").trim() || DEFAULT_FISH_BASE_URL;
+                const model = (config.model || "").trim() || DEFAULT_FISH_MODEL;
+                return { ...config, baseUrl, model };
+            }
             if (config.provider !== "Minimax") return config;
             const baseUrl = MINIMAX_BASE_URL_OPTIONS.some(option => option.baseUrl === config.baseUrl)
                 ? config.baseUrl
@@ -322,12 +337,12 @@ export function VoiceSettings() {
         if (providerOption === "FishAudio") {
             updateConfig(id, {
                 provider: "FishAudio",
-                baseUrl: "",
-                model: "",
+                baseUrl: DEFAULT_FISH_BASE_URL,
+                model: DEFAULT_FISH_MODEL,
                 defaultVoice: "",
             });
-            // 音色直接手填 Reference ID，模型字段对 Fish Audio 无意义
-            setManualModelIds(prev => ({ ...prev, [id]: true }));
+            // 音色直接手填 Reference ID；模型走内置下拉（可切手动输入）
+            setManualModelIds(prev => ({ ...prev, [id]: false }));
             setManualVoiceIds(prev => ({ ...prev, [id]: true }));
             return;
         }
@@ -699,6 +714,61 @@ export function VoiceSettings() {
                                                 <span className="menu-desc ml-1">可留空：自部署且服务端已配置 FISH_AUDIO_API_KEY 时，走服务端兜底密钥。</span>
                                             )}
                                         </div>
+                                        {config.provider === "FishAudio" && (
+                                            <>
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="menu-desc ml-1">接口地址 (Base URL)</label>
+                                                    <Input
+                                                        type="text"
+                                                        value={config.baseUrl || ""}
+                                                        onChange={(e) => updateConfig(config.id, { baseUrl: e.target.value })}
+                                                        placeholder="https://api.fish.audio"
+                                                    />
+                                                    <span className="menu-desc ml-1">官方地址 https://api.fish.audio，用自建反代可替换；合成/克隆/识别共用。</span>
+                                                </div>
+                                                <div className="flex flex-col gap-1">
+                                                    <label className="menu-desc ml-1">TTS 模型</label>
+                                                    {manualModelIds[config.id] ? (
+                                                        <div className="flex gap-2">
+                                                            <Input
+                                                                type="text"
+                                                                value={config.model || ""}
+                                                                onChange={(e) => updateConfig(config.id, { model: e.target.value })}
+                                                                placeholder="手动输入模型 ID（如 s2.1-pro）"
+                                                                className="flex-1"
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setManualModelIds(prev => ({ ...prev, [config.id]: false }))}
+                                                                className="ui-icon-btn"
+                                                                aria-label="返回模型下拉选择"
+                                                                title="返回模型下拉选择"
+                                                            >
+                                                                <List size={20} />
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <select
+                                                            value={FISH_AUDIO_MODELS.some(m => m.id === config.model) ? config.model : "__manual__"}
+                                                            onChange={(e) => {
+                                                                if (e.target.value === "__manual__") {
+                                                                    setManualModelIds(prev => ({ ...prev, [config.id]: true }));
+                                                                    return;
+                                                                }
+                                                                updateConfig(config.id, { model: e.target.value });
+                                                            }}
+                                                            className="ui-select"
+                                                        >
+                                                            {FISH_AUDIO_MODELS.map(model => (
+                                                                <option key={model.id} value={model.id}>{model.name}</option>
+                                                            ))}
+                                                            <option value="__manual__">手动输入...</option>
+                                                        </select>
+                                                    )}
+                                                    <span className="menu-desc ml-1">模型经 model 请求头发送；S2.1 Pro Free 适合测试，正式使用选 S2.1 Pro。</span>
+                                                </div>
+                                            </>
+                                        )}
                                         {config.provider === "OpenAI" && (
                                             <>
                                                 <div className="flex flex-col gap-1">
