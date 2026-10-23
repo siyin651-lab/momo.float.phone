@@ -195,6 +195,10 @@ async function synthesizeFishAudio(text: string, config: VoiceApiConfig): Promis
             text,
             reference_id: config.defaultVoice || undefined,
             apiKey: config.apiKey || undefined,
+            // Fish Audio 用 model 请求头选模型（s2.1-pro / s2-pro / s1...），由代理转发
+            model: config.model || undefined,
+            // 支持自定义接口地址（反代），留空走官方 https://api.fish.audio
+            baseUrl: config.baseUrl || undefined,
             format: "mp3",
         }),
     });
