@@ -8,7 +8,7 @@
 
 import type { MemoryNode, ScoredMemory } from './types';
 import { MemoryNodeDB } from './db';
-import { getEmotionVA, moodToVA, emotionDistance } from './emotionSpace';
+import { getEmotionVA, moodToVA, emotionDistance } from './emotion-space';
 
 const PRIMING_MAX_BOOST = 1.3;
 const PRIMING_RADIUS = 0.5;
