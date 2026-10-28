@@ -40,8 +40,8 @@ export type { RerankApiConfig, RerankResult } from './rerank';
 // 向量化 / 存储 / 去重
 export {
     vectorizeAndStore, updateStoredMemoryNode, checkModelConsistency, rebuildAllVectors,
-} from './vectorStore';
-export type { UpdateStoredMemoryNodeResult } from './vectorStore';
+} from './vector-store';
+export type { UpdateStoredMemoryNodeResult } from './vector-store';
 
 // 巩固
 export { runConsolidation, calculateEffectiveImportance, shouldPromote } from './consolidation';
@@ -51,12 +51,12 @@ export type { ConsolidationResult } from './consolidation';
 export { buildLinks, strengthenCoActivated } from './links';
 
 // 检索
-export { vectorSearch } from './vectorSearch';
-export type { VectorSearchResult } from './vectorSearch';
+export { vectorSearch } from './vector-search';
+export type { VectorSearchResult } from './vector-search';
 export { bm25Search, tokenize } from './bm25';
 export type { BM25Result } from './bm25';
-export { hybridSearch } from './hybridSearch';
-export type { HybridSearchPrefetch } from './hybridSearch';
+export { hybridSearch } from './hybrid-search';
+export type { HybridSearchPrefetch } from './hybrid-search';
 
 // 扩散激活 / 情绪启动
 export { spreadActivation } from './activation';
@@ -65,8 +65,8 @@ export { applyPriming, checkRumination } from './priming';
 // 情感空间
 export {
     getEmotionVA, moodToVA, emotionDistance, MOOD_TO_VA,
-} from './emotionSpace';
-export type { EmotionVA } from './emotionSpace';
+} from './emotion-space';
+export type { EmotionVA } from './emotion-space';
 
 // 水位线
 export {
