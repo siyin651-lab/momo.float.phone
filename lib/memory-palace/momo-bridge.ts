@@ -28,6 +28,7 @@ import { hybridSearch } from './hybrid-search';
 import { applyPriming } from './priming';
 import { spreadActivation } from './activation';
 import { getMemoryPalaceEnabled } from './config';
+import { runConsolidation } from './consolidation';
 import { resolveAuxiliaryApiConfig } from '../settings-storage';
 import { loadMemoryEntriesByType } from '../memory-storage';
 import { generateEmbedding, resolveEmbeddingModel } from '../memory-embedding';
@@ -208,6 +209,9 @@ export async function recallLongTermFromPalace(
         }
         if (rankedNodes.length === 0) return null;
 
+        // 访问痕迹：被想起的记忆"更熟了"，后续更容易再被想起，也更容易晋升到卧室
+        void touchRecalledNodes(rankedNodes).catch(() => {});
+
         // ⑤ 按老配置的 token 预算截取，保证注入体积不变
         const entries = rankedNodes.map(node => nodeToMemoryEntry(node, characterId, sourceApp));
         return fillEntriesByBudget(entries, config.longTermTokenBudget);
@@ -352,12 +356,14 @@ export async function mirrorEntryToPalace(
         const apiConfig = resolveUsableEmbeddingApi();
         if (!apiConfig) {
             await MemoryNodeDB.save({ ...node, embedded: false });
+            void maybeConsolidate(entry.characterId).catch(() => {});
             return { stored: true, embedded: false, reason: 'no-embedding-api' };
         }
 
         const vector = await generateEmbedding(node.content, apiConfig);
         if (!vector || vector.length === 0) {
             await MemoryNodeDB.save({ ...node, embedded: false });
+            void maybeConsolidate(entry.characterId).catch(() => {});
             return { stored: true, embedded: false, reason: 'embedding-failed' };
         }
 
@@ -372,6 +378,9 @@ export async function mirrorEntryToPalace(
                 model: resolveEmbeddingModel(apiConfig) || '',
             },
         }]);
+        // 新记忆进客厅后顺手跑一次巩固（节流 1 小时/角色）：重要度够或被反复想起的晋升到卧室，
+        // 客厅超 200 条时把最不重要的沉到阁楼——遗忘曲线就是在这里生效的。
+        void maybeConsolidate(entry.characterId).catch(() => {});
         return { stored: true, embedded: true };
     } catch (error) {
         console.warn('[MemoryPalace] 镜像写入失败（不影响原有记忆）：', error);
@@ -468,6 +477,57 @@ export async function hasPalaceData(characterId: string): Promise<boolean> {
     }
 }
 
+// ─── 访问痕迹（熟悉度 / 晋升判定的数据源） ──────────────
+
+/**
+ * 回写被召回记忆的访问痕迹：accessCount +1、lastAccessedAt 刷新。
+ *
+ * 这一步不能省——`shouldPromote` 靠 accessCount 判断"被反复想起就该晋升到卧室"，
+ * `hybridSearch` 的熟悉度加成也读它。不回写的话这两套机制永远是 0，引擎只退化成一个普通向量库。
+ * 异步 fire-and-forget，不拖慢召回。
+ */
+async function touchRecalledNodes(nodes: MemoryNode[]): Promise<void> {
+    const now = Date.now();
+    for (const node of nodes) {
+        try {
+            await MemoryNodeDB.save({
+                ...node,
+                accessCount: (node.accessCount || 0) + 1,
+                lastAccessedAt: now,
+            });
+        } catch {
+            // 单条写失败不影响其余，也不影响本次召回结果
+        }
+    }
+}
+
+// ─── 巩固（晋升 / 沉底）调度 ────────────────────────────
+
+/** 同一角色两次巩固之间的最小间隔，避免每次镜像都全量扫房间。 */
+const CONSOLIDATION_INTERVAL_MS = 60 * 60 * 1000;
+const lastConsolidationAt = new Map<string, number>();
+
+/**
+ * 触发一次巩固：客厅 → 卧室晋升（重要度够高 / 被反复想起），
+ * 客厅超容量时把最不重要的沉到阁楼。
+ *
+ * 这就是"仿脑遗忘"真正生效的地方——不做这一步，palace 只是个普通向量库。
+ * 节流到每小时最多一次；纯本地 IDB 操作，不调外部 API。
+ */
+async function maybeConsolidate(characterId: string): Promise<void> {
+    const last = lastConsolidationAt.get(characterId) ?? 0;
+    if (Date.now() - last < CONSOLIDATION_INTERVAL_MS) return;
+    lastConsolidationAt.set(characterId, Date.now());
+    try {
+        const result = await runConsolidation(characterId);
+        if (result.promoted.length > 0 || result.evicted.length > 0) {
+            console.log('[MemoryPalace] 巩固完成：', result);
+        }
+    } catch (error) {
+        console.warn('[MemoryPalace] 巩固失败（不影响记忆读写）：', error);
+    }
+}
+
 // ─── 自动播种（首次接管时把老记忆搬进房间） ──────────────
 
 const SEEDED_KEY = (charId: string) => `mp_seeded_${charId}`;
@@ -494,6 +554,8 @@ async function autoSeedPalace(characterId: string): Promise<void> {
             kvSet(SEEDED_KEY(characterId), 'done');
         }
         console.log('[MemoryPalace] 自动播种完成：', result);
+        // 一次搬进来一大批，顺手巩固一遍：重要度高的升卧室，客厅超容量的沉阁楼
+        void maybeConsolidate(characterId).catch(() => {});
     } catch (error) {
         console.warn('[MemoryPalace] 自动播种失败（下次会重试）：', error);
     } finally {
