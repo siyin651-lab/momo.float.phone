@@ -10,7 +10,7 @@ import type { EmbeddingConfig, MemoryNode, MemoryRoom, MemoryVector, ScoredMemor
 import { resolveMemoryScoringRoom } from './types';
 import { MemoryNodeDB } from './db';
 import { getEmbedding } from './embedding';
-import { vectorSearch } from './vectorSearch';
+import { vectorSearch } from './vector-search';
 import { bm25Search } from './bm25';
 import { calculateEffectiveImportance } from './consolidation';
 
