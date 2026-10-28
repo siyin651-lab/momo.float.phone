@@ -6,7 +6,6 @@ import { loadMemoryEntriesByType } from "./memory-storage";
 import { resolveAuxiliaryApiConfig } from "./settings-storage";
 import { generateEmbedding, resolveEmbeddingModel, cosineSimilarity } from "./memory-embedding";
 import { estimateTokens } from "./token-counter";
-import { recallCoreFromPalace, recallLongTermFromPalace } from "./memory-palace/momo-bridge";
 
 /**
  * Retrieve relevant long-term memories for prompt injection.
@@ -21,16 +20,6 @@ export async function retrieveMemoriesForPrompt(
     currentContext: string,
     config: MemoryConfig
 ): Promise<MemoryEntry[]> {
-    // ── 记忆库（Memory Palace）接管点 ──
-    // 未启用 / 房间里还没数据 / 取向量失败 / 任何异常 → 返回 null，自动落回下面的老逻辑。
-    // 所以"没做过迁移"时行为与接入前完全一致，不存在记忆突然消失的风险。
-    const palaceEntries = await recallLongTermFromPalace({
-        characterId,
-        query: currentContext,
-        config,
-    });
-    if (palaceEntries && palaceEntries.length > 0) return palaceEntries;
-
     const longTermEntries = await loadMemoryEntriesByType(characterId, "long_term");
     if (longTermEntries.length === 0 || !currentContext.trim()) return [];
 
@@ -75,12 +64,6 @@ export async function retrieveCoreMemoriesForPrompt(
     characterId: string,
     config: MemoryConfig,
 ): Promise<MemoryEntry[]> {
-    // ── 记忆库（Memory Palace）接管点 ──
-    // 优先读门牌（TA的事 / 我是谁 / 我们之间 / 我的领域），门牌没整理时退到自我房+用户房高权重节点。
-    // 同样：不可用就返回 null，落回老的核心记忆逻辑。
-    const palaceCore = await recallCoreFromPalace({ characterId, config });
-    if (palaceCore && palaceCore.length > 0) return palaceCore;
-
     const coreEntries = await loadMemoryEntriesByType(characterId, "core");
     if (coreEntries.length === 0) return [];
 

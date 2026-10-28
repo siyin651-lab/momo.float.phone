@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Brain, Filter, MoreHorizontal, Sparkles, Trash2 } from "lucide-react";
 import { MemoryBankPage } from "./memory/memory-bank-page";
-import { MemoryPalacePage } from "./memory/memory-palace-page";
 import { VnAssetPage } from "./vn/vn-asset-page";
 import { loadCharacters } from "@/lib/character-storage";
 import { PageShell } from "./ui/page-shell";
@@ -12,15 +11,6 @@ import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 
 export type ResourceSubPage = "main" | "memory" | "vn_assets";
 type MemoryView = "list" | "detail" | "settings";
-
-/**
- * 「记忆库」用哪套界面：
- *   true  = 记忆宫殿七房间视图（读新引擎的 momo_memory_palace_v1）
- *   false = 原来的四 Tab 视图（短期/共享/核心/长期，读老库 ai_phone_memory_db_v1）
- *
- * 出问题把这个常量改回 false 就能立刻回到老界面——老页面代码一直保留着，没删。
- */
-const USE_PALACE_VIEW = true;
 
 const RESOURCE_MENU: Omit<FeaturedCardItem, "onClick">[] = [
     {
@@ -95,14 +85,13 @@ export function PhoneResourcesApp({ onClose, onNotice, initialPage }: { onClose:
 
     const title = currentPage === "main" ? "资源库"
         : currentPage === "memory"
-            ? (USE_PALACE_VIEW ? "记忆库"
-                : memoryView === "settings" ? "记忆设置"
-                    : memoryView === "detail" ? (memoryCharName || "记忆详情")
-                        : "记忆库")
+            ? (memoryView === "settings" ? "记忆设置"
+                : memoryView === "detail" ? (memoryCharName || "记忆详情")
+                    : "记忆库")
             : currentPage === "vn_assets" ? "漫卷资源"
                 : "资源库";
 
-    const showSettingsIcon = !USE_PALACE_VIEW && currentPage === "memory" && memoryView !== "settings";
+    const showSettingsIcon = currentPage === "memory" && memoryView !== "settings";
     const showMemoryFilterIcon = currentPage === "memory" && memoryView === "detail" && memoryFilterState.visible && !memoryFilterState.bulkSelecting;
 
     return (
@@ -181,20 +170,16 @@ export function PhoneResourcesApp({ onClose, onNotice, initialPage }: { onClose:
                 )}
 
                 {currentPage === "memory" && (
-                    USE_PALACE_VIEW ? (
-                        <MemoryPalacePage onNotice={onNotice} />
-                    ) : (
-                        <MemoryBankPage
-                            view={memoryView}
-                            selectedCharId={memoryCharId}
-                            onSelectChar={handleSelectChar}
-                            onNotice={onNotice}
-                            filterOpen={memoryFilterOpen}
-                            onFilterOpenChange={handleMemoryFilterOpenChange}
-                            onFilterStateChange={handleMemoryFilterStateChange}
-                            bulkDeleteRequest={memoryBulkDeleteRequest}
-                        />
-                    )
+                    <MemoryBankPage
+                        view={memoryView}
+                        selectedCharId={memoryCharId}
+                        onSelectChar={handleSelectChar}
+                        onNotice={onNotice}
+                        filterOpen={memoryFilterOpen}
+                        onFilterOpenChange={handleMemoryFilterOpenChange}
+                        onFilterStateChange={handleMemoryFilterStateChange}
+                        bulkDeleteRequest={memoryBulkDeleteRequest}
+                    />
                 )}
             </div>
         </PageShell>
