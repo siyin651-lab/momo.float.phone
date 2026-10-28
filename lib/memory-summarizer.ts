@@ -20,6 +20,7 @@ import { loadNativeTimeline, formatTimelineForSummarization, filterTimelineByAll
 import { generateEmbedding, resolveEmbeddingModel } from "./memory-embedding";
 import { simpleLLMCall } from "./api-helpers";
 import { maybeRunCoreMemoryPipeline } from "./core-memory-builder";
+import { mirrorEntryToPalace } from "./memory-palace/momo-bridge";
 
 /** Per-character lock to prevent concurrent summarization. */
 const summarizingSet = new Set<string>();
@@ -165,6 +166,12 @@ export async function runSummarizationPipeline(
         },
     };
     await saveMemoryEntry(longTermEntry);
+
+    // ── 镜像进记忆库（Memory Palace）──
+    // 不阻塞主流程、失败静默：palace 未启用或无 embedding 配置时内部自动跳过。
+    // 注意：老系统仍按 maxLongTermEntries 淘汰旧条目，而 palace 里的副本会保留
+    // （相当于沉到阁楼而不是被删除），这是"仿脑遗忘"与"硬删除"的语义差异，属预期行为。
+    void mirrorEntryToPalace(longTermEntry).catch(() => {});
 
     // Update last summarized timestamp + reset counter
     setLastSummarizedTimestamp(characterId, latest);
