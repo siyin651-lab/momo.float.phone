@@ -13,7 +13,7 @@ import type { MemoryNode, MemoryLink, LinkType, LightLLMConfig } from './types';
 import { MemoryLinkDB } from './db';
 import { safeFetchJson } from './safe-api';
 import { safeParseJsonArray } from './json-utils';
-import { getEmotionVA, emotionDistance } from './emotionSpace';
+import { getEmotionVA, emotionDistance } from './emotion-space';
 
 const TEMPORAL_WINDOW_MS = 24 * 60 * 60 * 1000;
 const CO_ACTIVATION_INCREMENT = 0.05;
