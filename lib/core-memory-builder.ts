@@ -11,6 +11,7 @@ import {
 } from "./memory-storage";
 import { resolveAuxiliaryApiConfig } from "./settings-storage";
 import { simpleLLMCall } from "./api-helpers";
+import { mirrorEntryToPalace } from "./memory-palace/momo-bridge";
 
 const coreBuildingSet = new Set<string>();
 
@@ -131,6 +132,11 @@ export async function runCoreMemoryPipeline(
         },
     };
     await saveMemoryEntry(coreEntry);
+
+    // ── 镜像进记忆库（Memory Palace）──
+    // core 每次重建都是新 id，所以带上 archiveRoomSiblings：只保留最新一份画像，
+    // 避免自我房里堆出一串过期版本。失败静默，不影响老流程。
+    void mirrorEntryToPalace(coreEntry, { archiveRoomSiblings: true }).catch(() => {});
 
     setLastCoreSummarizedTimestamp(characterId, latest);
     if (!options?.force) {
