@@ -70,6 +70,7 @@ import {
 import { resolveUserIdentity } from "@/lib/settings-storage";
 import { incrementEventCounter } from "@/lib/memory-storage";
 import { maybeRunSummarization } from "@/lib/memory-summarizer";
+import { FloatingPhone } from "@/components/floating-phone/floating-phone";
 
 type CoCreateAppProps = {
   onClose: () => void;
@@ -1703,6 +1704,7 @@ export function CoCreateApp({ onClose, onNotice }: CoCreateAppProps) {
 
   return (
     <div className="cocreate-app">
+      <FloatingPhone />
       <div className="cocreate-cosmic" aria-hidden="true" />
       <div className="cocreate-stars" aria-hidden="true" />
       {status && (
