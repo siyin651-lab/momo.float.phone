@@ -29,6 +29,7 @@ import { StoryApp } from "@/components/story/story-app";
 import { VnApp } from "@/components/vn/vn-app";
 import ReadingApp from "@/components/reading/reading-app";
 import MapApp from "@/components/map/map-app";
+import { FloatingPhone } from "@/components/floating-phone/floating-phone";
 import { DwellingApp } from "@/components/dwelling/dwelling-app";
 import { MascotFloat } from "@/components/mascot/mascot-float";
 import { MascotPreviewHost } from "@/components/mascot/mascot-preview-host";
@@ -4829,6 +4830,11 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
               <MascotFloat />
               {/* 预览弹窗宿主：独立于桌宠的展开/收起状态，否则桌宠收成小球时弹不出来 */}
               <MascotPreviewHost />
+
+              {/* 全局悬浮小手机：桌面与各 app 内常驻；剧情/聊天/群聊自身已有完整聊天界面，隐藏避免重复 */}
+              <FloatingPhone
+                enabled={activeApp !== "story" && activeApp !== "chat" && activeApp !== "group_chat"}
+              />
 
               {/* Widget Picker Bottom Sheet */}
               {showWidgetPicker && (

@@ -4,7 +4,6 @@ import { useState, useCallback } from "react";
 
 import MapLobby from "./map-lobby";
 import MapView from "./map-view";
-import { FloatingPhone } from "@/components/floating-phone/floating-phone";
 import type { MapWorld, GameSave } from "@/lib/map-types";
 
 type View = "lobby" | "playing";
@@ -28,22 +27,14 @@ export default function MapApp({ onClose }: { onClose: () => void }) {
 
   if (view === "playing" && activeWorld && activeSave) {
     return (
-      <>
-        <MapView
-          world={activeWorld}
-          save={activeSave}
-          onSaveUpdate={setActiveSave}
-          onBack={handleBackToLobby}
-        />
-        <FloatingPhone />
-      </>
+      <MapView
+        world={activeWorld}
+        save={activeSave}
+        onSaveUpdate={setActiveSave}
+        onBack={handleBackToLobby}
+      />
     );
   }
 
-  return (
-    <>
-      <MapLobby onClose={onClose} onStartGame={handleStartGame} />
-      <FloatingPhone />
-    </>
-  );
+  return <MapLobby onClose={onClose} onStartGame={handleStartGame} />;
 }
